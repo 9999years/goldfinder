@@ -3,6 +3,46 @@ import argparse
 from urllib import parse as urlparse
 from lxml import html
 import re
+import sys
+
+# https://stackoverflow.com/a/14981125/5719760
+def err(*args, **kwargs):
+    print('ERROR: ', *args, file=sys.stderr, **kwargs)
+
+def err_exit(*args, **kwargs):
+    err(*args, **kwargs)
+    sys.exit(-1)
+
+def warn(*args, **kwargs):
+    print('WARNING: ', *args, file=sys.stderr, **kwargs)
+
+def check_list_bound(listy, bound):
+    length = len(listy)
+    return length > bound >= -length
+
+def get_in(dictionary, *keys):
+    for key in keys:
+        if isinstance(key, list):
+            if check_list_bound(dictionary, key):
+                dictionary = dictionary[key]
+            else:
+                return None
+        else:
+            if key in dictionary:
+                dictionary = dictionary[key]
+            else:
+                return None
+    return dictionary
+
+def check_internet(request):
+    if request.status_code == 200:
+        return request
+    else:
+        return ('Internet problem! '
+            '{url} responded with status {code}: {reason}!'.format(
+                url=request.url,
+                code=request.status_code,
+                reason=request.reason))
 
 def search_raw(search_term):
     params = {
@@ -11,11 +51,17 @@ def search_raw(search_term):
         'vl(freeText0)': search_term,
         'fn': 'search',
         'tab': 'alma',
+        'fctN': 'facet_tlevel',
+        'fctV': 'available',
     }
 
     url = 'http://search.library.brandeis.edu/primo_library/libweb/action/search.do'
 
-    return requests.get(url, params=params)
+    r = requests.get(url, params=params)
+    status = check_internet(r)
+    if status is None:
+        err(status)
+    return r
 
 def search(search_term):
     tree = html.fromstring(search_raw(search_term).content)
@@ -66,20 +112,36 @@ def search(search_term):
     return ret
 
 def aisle(item):
-    return item['directions']['maps'][0]['ranges'][0]['label']
+    return get_in(item, 'directions', 'maps', 0, 'ranges', 0, 'label') or ''
 
 def floor(item):
-    url = urlparse.urlparse(item['directions']['maps'][0]['mapurl'])
+    url = get_in(item, 'directions', 'maps', 0, 'mapurl')
+    if url is None:
+        return ''
+    url = urlparse.urlparse(url)
     params = urlparse.parse_qs(url.query)
-    floor = params['floor'][0]
-    return 'M' if floor == '5' else int(floor)
+    floor = get_in(params, 'floor', 0)
+    if floor is None:
+        return ''
+    else:
+        if floor == '5':
+            return 'M'
+        else:
+            return int(floor)
 
 def building(item):
     # something like: Please proceed to the mezzanine level of the Goldfarb
-    # building of the Brandeis University Library.
-    directions = item['directions']['maps'][0]['directions']
+    directions = get_in(item, 'directions', 'maps', 0, 'directions')
+    print(directions)
     matches = re.search(r'(Goldfarb|Farber) building', directions)
-    return matches.groups()[0]
+    default = 'Goldfarb / Farber'
+    if matches is None:
+        return default
+    groups = matches.groups()
+    if len(groups) == 0:
+        return default
+    else:
+        return groups[0]
 
 def directions(item):
     if 'directions' in item:
@@ -92,8 +154,13 @@ def directions(item):
 
     url = 'https://brandeis.stackmap.com/json/'
 
-    item.update({'directions': requests.get(
-        url, params=params).json()['results'][0]})
+    r = requests.get(url, params=params)
+    status = check_internet(r)
+    if status is None:
+        err(status)
+        return
+
+    item.update({'directions': r.json()['results'][0]})
 
     directions = item['directions']
     directions['aisle'] = aisle(item)
@@ -121,12 +188,16 @@ def main():
     )
 
     parser.add_argument('search_term', nargs='+')
-    parser.add_argument('-f', '--first', action='store_true',
-        help='display only the first result')
+    parser.add_argument('-a', '--all', action='store_true',
+        help='parse all results')
     args = parser.parse_args()
 
     results = search(args.search_term)
-    if args.first:
+
+    if len(results) == 0:
+        err_exit('no results!')
+
+    if not args.all:
         results = [results[0]]
     for result in results:
         print(pretty(result))
