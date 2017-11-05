@@ -60,8 +60,13 @@ def search(search_term):
         item.update({k: el_to_txt(v) for k, v in item.items()})
         item['call'] = fix_call(item['call'])
 
+        directions(item)
+
         ret.append(item)
     return ret
+
+def aisle(item):
+    return item['directions']['maps'][0]['ranges'][0]['label']
 
 def floor(item):
     url = urlparse.urlparse(item['directions']['maps'][0]['mapurl'])
@@ -73,7 +78,8 @@ def building(item):
     # something like: Please proceed to the mezzanine level of the Goldfarb
     # building of the Brandeis University Library.
     directions = item['directions']['maps'][0]['directions']
-    return re.match('(Goldfarb|Farber) building', directions)
+    matches = re.search(r'(Goldfarb|Farber) building', directions)
+    return matches.groups()[0]
 
 def directions(item):
     if 'directions' in item:
@@ -89,7 +95,10 @@ def directions(item):
     item.update({'directions': requests.get(
         url, params=params).json()['results'][0]})
 
-    item['directions']['floor'] = floor(item)
+    directions = item['directions']
+    directions['aisle'] = aisle(item)
+    directions['floor'] = floor(item)
+    directions['building'] = building(item)
 
 def top(search_term):
     return search(search_term)[0]
@@ -97,12 +106,13 @@ def top(search_term):
 def pretty(item):
     ret = []
     ret.append('{title} ({year}, {author})'.format(**item))
-    return ''.join(ret)
+    ret.append('{building} {floor}, {aisle}: {callno}'.format(
+        **item['directions']))
+    return '\n'.join(ret)
 
 def simple():
     marx = top('marx')
-    directions(marx)
-    # print(pretty(marx))
+    print(pretty(marx))
     return marx
 
 def main():
@@ -111,12 +121,16 @@ def main():
     )
 
     parser.add_argument('search_term', nargs='+')
+    parser.add_argument('-f', '--first', action='store_true',
+        help='display only the first result')
     args = parser.parse_args()
 
-    results = search(search_term)
+    results = search(args.search_term)
+    if args.first:
+        results = [results[0]]
     for result in results:
-        print('{title} ({year}, {author})'.format(result))
-        print('----------')
+        print(pretty(result))
+        print()
 
-if __name__ == 'main':
+if __name__ == '__main__':
     main()
