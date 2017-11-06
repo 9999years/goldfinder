@@ -6,7 +6,7 @@ here = path.abspath(path.dirname(__file__))
 
 setup(
     name='goldfinder',
-    version='1.0.1',
+    version='1.1.0',
 
     description='''App for locating materials in the Brandeis Goldfarb and Farber libraries''',
     # rst is some bull shit and i will not be party to it. markdown or die
@@ -42,5 +42,10 @@ setup(
         'requests',
         'lxml',
         'cssselect',
-    ]
+    ],
+    extras_require={
+        'dev': [
+            'pytest',
+        ]
+    }
 )

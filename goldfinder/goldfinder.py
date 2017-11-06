@@ -5,7 +5,7 @@ from lxml import html
 import re
 
 # local
-import misc
+import goldfinder.misc
 
 def search_raw(search_term):
     params = {
