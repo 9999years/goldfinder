@@ -17,10 +17,7 @@ def search_raw(search_term):
 
     return requests.get(url, params=params)
 
-def search(search_term):
-    tree = html.fromstring(search_raw(search_term).content)
-    results = tree.cssselect('td.EXLSummary')
-
+def process_result(result):
     def el_to_txt(e):
         txt = e[0].text_content()
         return '' if txt is None else txt.strip()
@@ -28,41 +25,38 @@ def search(search_term):
     def fix_call(call_number):
         return call_number.strip('() \t\r\n')
 
+    availability = result.cssselect('em.EXLResultStatusAvailable')[0]
+    summary = result.cssselect('div.EXLSummaryFields')[0]
+
+    exl_prefix = 'span.EXLAvailability'
+
+    item = {
+        'library':     availability.cssselect(exl_prefix + 'LibraryName'),
+        'collection':  availability.cssselect(exl_prefix + 'CollectionName'),
+        'call':        availability.cssselect(exl_prefix + 'CallNumber'),
+        'title':       summary.cssselect('h2.EXLResultTitle > a'),
+        'author':      summary.cssselect('h3.EXLResultAuthor'),
+        'details':     summary.cssselect('span.EXLResultDetails'),
+        'year':        summary.cssselect('h3.EXLResultFourthLine'),
+    }
+
+    if len(item['call']) == 0:
+        continue
+
+    item.update({k: el_to_txt(v) for k, v in item.items()})
+    item['call'] = fix_call(item['call'])
+
+    directions(item)
+    return item
+
+
+def search(search_term):
+    tree = html.fromstring(search_raw(search_term).content)
+    results = tree.cssselect('td.EXLSummary')
+
     ret = []
     for result in results:
-        # <p class="EXLResultAvailability">
-        # <em class="EXLResultStatusAvailable" id="RTADivTitle_0">
-        # Available at <span class="EXLAvailabilityLibraryName">
-        # Main Library</span>&nbsp;
-        # <span class="EXLAvailabilityCollectionName">
-        # Stacks</span>&nbsp;
-        # <span class="EXLAvailabilityCallNumber">
-        # (B3305.M74 C56 2004 )</span><span id="RTASpan_0">()</span> </em>
-
-        availability = result.cssselect('em.EXLResultStatusAvailable')[0]
-        summary = result.cssselect('div.EXLSummaryFields')[0]
-
-        exl_prefix = 'span.EXLAvailability'
-
-        item = {
-            'library':     availability.cssselect(exl_prefix + 'LibraryName'),
-            'collection':  availability.cssselect(exl_prefix + 'CollectionName'),
-            'call':        availability.cssselect(exl_prefix + 'CallNumber'),
-            'title':       summary.cssselect('h2.EXLResultTitle > a'),
-            'author':      summary.cssselect('h3.EXLResultAuthor'),
-            'details':     summary.cssselect('span.EXLResultDetails'),
-            'year':        summary.cssselect('h3.EXLResultFourthLine'),
-        }
-
-        if len(item['call']) == 0:
-            continue
-
-        item.update({k: el_to_txt(v) for k, v in item.items()})
-        item['call'] = fix_call(item['call'])
-
-        directions(item)
-
-        ret.append(item)
+        ret.append(process_result(result))
     return ret
 
 def aisle(item):
