@@ -96,7 +96,7 @@ def add_directions(item):
     item['directions']['building'] = get_building(directions)
     item['directions']['floor']    = get_floor(directions)
     item['directions']['aisle']    = get_aisle(directions)
-    item['directions']['english']  = get_english(directions)
+    # item['directions']['english']  = get_english(directions)
 
 def search(search_term, max_count=10):
     """
@@ -116,7 +116,8 @@ def search(search_term, max_count=10):
         aisle: something like 3a
         english: plain-english directions, something like "Please proceed to the
             third floor of Brandeis University Library." but strangely doesn't
-            contain the aisle or say "about halfway down" or anything
+            contain the aisle or say "about halfway down" or anything.
+            currently disabled.
     """
     tree = html.fromstring(search_raw(search_term).content)
     results = tree.cssselect('td.EXLSummary')
@@ -164,7 +165,7 @@ def search(search_term, max_count=10):
     return ret
 
 def top(search_term):
-    return search(search_term)[0]
+    return search(search_term, max_count=1)[0]
 
 def pretty(item):
     ret = []
@@ -185,22 +186,36 @@ def get_directions(
         separators=False,
         verbose=False,
         continue_numbering=False,
+        suppress=False,
         ):
+
     ret = []
     results = []
+    total_results = 0
+
+    print(search)
 
     for search_t in search_term:
-        results.append(search(search_t, amount))
+        search_results = search(search_t, amount)
+        total_results += len(search_results)
+        results.append(search_results)
 
-    if len(results) == 0:
+    if total_results == 0:
         misc.err_exit('no results!')
-    elif len(results) == 1 and not numbered:
+    elif total_results == 1 and not numbered:
         raw = True
-    elif not raw or numbered:
+    elif not raw or numbered or (total_results > 1 and not raw):
         numbered = True
-        number_col_w = misc.digits(len(results)) + len(number_postfix)
+        number_col_w = misc.digits(total_results) + len(number_postfix)
 
     i = 1
+
+    if suppress:
+        ret = []
+        for result_group in results:
+            ret.extend(result_group)
+        return ret
+
     for search_t, search_results in zip(search_term, results):
         if separators:
             ret.append('\n' + ' ' * indent + search_t.upper())
@@ -230,7 +245,7 @@ def main():
     parser.add_argument('search_term', nargs='+',
         help='search term passed directly to OneSearch, '
         'search.library.brandeis.edu. can be a call number, title, or author')
-    parser.add_argument('-a', '--amount', type=int, metavar='N',
+    parser.add_argument('-a', '--amount', type=int, metavar='N', default=1,
         help='parse N results (max 10)')
     parser.add_argument('-n', '--numbered', action='store_true',
         help='format output as a numbered list')
@@ -244,8 +259,10 @@ def main():
         help='output headers between search terms')
     parser.add_argument('-c', '--continue-numbering', action='store_true',
         help='don\'t reset list numbering between search terms')
-    parser.add_argument('-v', '--verbose', action='store_true',
+    parser.add_argument('--verbose', action='store_true',
         help='verbose / debug output; print dicts as well as formatted output')
+    parser.add_argument('--suppress', action='store_true',
+        help='don\'t output formatted data; useful with --verbose')
     args = parser.parse_args()
 
     print(get_directions(**args.__dict__))
