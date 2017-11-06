@@ -5,6 +5,9 @@ from lxml import html
 import re
 import sys
 
+# local
+import misc
+
 # https://stackoverflow.com/a/14981125/5719760
 def err(*args, **kwargs):
     print('ERROR: ', *args, file=sys.stderr, **kwargs)
@@ -21,18 +24,12 @@ def check_list_bound(listy, bound):
     return length > bound >= -length
 
 def get_in(dictionary, *keys):
-    for key in keys:
-        if isinstance(key, list):
-            if check_list_bound(dictionary, key):
-                dictionary = dictionary[key]
-            else:
-                return None
-        else:
-            if key in dictionary:
-                dictionary = dictionary[key]
-            else:
-                return None
-    return dictionary
+    if len(keys) == 0:
+        return dictionary
+    try:
+        return get_in(dictionary[keys[0]], *keys[1:])
+    except (IndexError, KeyError) as e:
+        return None
 
 def check_internet(request):
     if request.status_code == 200:
@@ -63,7 +60,7 @@ def search_raw(search_term):
         err(status)
     return r
 
-def search(search_term):
+def search(search_term, max_count=10):
     tree = html.fromstring(search_raw(search_term).content)
     results = tree.cssselect('td.EXLSummary')
 
@@ -76,15 +73,6 @@ def search(search_term):
 
     ret = []
     for result in results:
-        # <p class="EXLResultAvailability">
-        # <em class="EXLResultStatusAvailable" id="RTADivTitle_0">
-        # Available at <span class="EXLAvailabilityLibraryName">
-        # Main Library</span>&nbsp;
-        # <span class="EXLAvailabilityCollectionName">
-        # Stacks</span>&nbsp;
-        # <span class="EXLAvailabilityCallNumber">
-        # (B3305.M74 C56 2004 )</span><span id="RTASpan_0">()</span> </em>
-
         availability = result.cssselect('em.EXLResultStatusAvailable')[0]
         summary = result.cssselect('div.EXLSummaryFields')[0]
 
@@ -109,6 +97,10 @@ def search(search_term):
         directions(item)
 
         ret.append(item)
+
+        if len(ret) >= max_count:
+            break
+
     return ret
 
 def aisle(item):
@@ -132,7 +124,6 @@ def floor(item):
 def building(item):
     # something like: Please proceed to the mezzanine level of the Goldfarb
     directions = get_in(item, 'directions', 'maps', 0, 'directions')
-    print(directions)
     matches = re.search(r'(Goldfarb|Farber) building', directions)
     default = 'Goldfarb / Farber'
     if matches is None:
@@ -177,11 +168,6 @@ def pretty(item):
         **item['directions']))
     return '\n'.join(ret)
 
-def simple():
-    marx = top('marx')
-    print(pretty(marx))
-    return marx
-
 def main():
     parser = argparse.ArgumentParser(
         description='Find materials in the Brandeis Goldfarb / Farber libraries.',
@@ -190,18 +176,36 @@ def main():
     parser.add_argument('search_term', nargs='+')
     parser.add_argument('-a', '--all', action='store_true',
         help='parse all results')
+    parser.add_argument('-n', '--numbered', action='store_true',
+        help='format output as a numbered list')
+    parser.add_argument('-w', '--width', type=int, default=78,
+        help='output width')
+    parser.add_argument('-r', '--raw', action='store_true',
+        help='raw output; don\'t wrap text')
+    parser.add_argument('--number-postfix', default='. ',
+        help='string to output after the number in numbered output')
     args = parser.parse_args()
 
-    results = search(args.search_term)
+    results = search(args.search_term, 10 if args.all else 1)
 
     if len(results) == 0:
         err_exit('no results!')
+    elif len(results) == 1 and not args.numbered:
+        args.raw = True
+    elif not args.raw or args.numbered:
+        args.numbered = True
+        number_col_w = misc.digits(len(results)) + len(args.number_postfix)
 
-    if not args.all:
-        results = [results[0]]
-    for result in results:
-        print(pretty(result))
-        print()
+    for i, result in zip(range(1, len(results) + 1), results):
+        if args.numbered:
+            print(misc.format_left(
+                pretty(result),
+                firstline=str(i) + args.number_postfix,
+                reformat=False,
+                width=args.width))
+        else:
+            print(pretty(result))
+            print()
 
 if __name__ == '__main__':
     main()
