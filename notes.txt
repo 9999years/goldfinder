@@ -6,6 +6,8 @@ GET params:
     vl(freeText0)=(Search term or call number)
     fn=search
     tab=alma
+    fctN=facet_tlevel
+    fctV=available
 
 extract info from first em.EXLResultStatusAvailable
 
