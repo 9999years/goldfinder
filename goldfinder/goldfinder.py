@@ -3,43 +3,9 @@ import argparse
 from urllib import parse as urlparse
 from lxml import html
 import re
-import sys
 
 # local
 import misc
-
-# https://stackoverflow.com/a/14981125/5719760
-def err(*args, **kwargs):
-    print('ERROR: ', *args, file=sys.stderr, **kwargs)
-
-def err_exit(*args, **kwargs):
-    err(*args, **kwargs)
-    sys.exit(-1)
-
-def warn(*args, **kwargs):
-    print('WARNING: ', *args, file=sys.stderr, **kwargs)
-
-def check_list_bound(listy, bound):
-    length = len(listy)
-    return length > bound >= -length
-
-def get_in(dictionary, *keys):
-    if len(keys) == 0:
-        return dictionary
-    try:
-        return get_in(dictionary[keys[0]], *keys[1:])
-    except (IndexError, KeyError) as e:
-        return None
-
-def check_internet(request):
-    if request.status_code == 200:
-        return request
-    else:
-        return ('Internet problem! '
-            '{url} responded with status {code}: {reason}!'.format(
-                url=request.url,
-                code=request.status_code,
-                reason=request.reason))
 
 def search_raw(search_term):
     params = {
@@ -55,9 +21,9 @@ def search_raw(search_term):
     url = 'http://search.library.brandeis.edu/primo_library/libweb/action/search.do'
 
     r = requests.get(url, params=params)
-    status = check_internet(r)
+    status = misc.(r)
     if status is None:
-        err(status)
+        misc.err(status)
     return r
 
 def search(search_term, max_count=10):
@@ -104,15 +70,15 @@ def search(search_term, max_count=10):
     return ret
 
 def aisle(item):
-    return get_in(item, 'directions', 'maps', 0, 'ranges', 0, 'label') or ''
+    return misc.(item, 'directions', 'maps', 0, 'ranges', 0, 'label') or ''
 
 def floor(item):
-    url = get_in(item, 'directions', 'maps', 0, 'mapurl')
+    url = misc.(item, 'directions', 'maps', 0, 'mapurl')
     if url is None:
         return ''
     url = urlparse.urlparse(url)
     params = urlparse.parse_qs(url.query)
-    floor = get_in(params, 'floor', 0)
+    floor = misc.(params, 'floor', 0)
     if floor is None:
         return ''
     else:
@@ -123,7 +89,7 @@ def floor(item):
 
 def building(item):
     # something like: Please proceed to the mezzanine level of the Goldfarb
-    directions = get_in(item, 'directions', 'maps', 0, 'directions')
+    directions = misc.(item, 'directions', 'maps', 0, 'directions')
     matches = re.search(r'(Goldfarb|Farber) building', directions)
     default = 'Goldfarb / Farber'
     if matches is None:
@@ -146,9 +112,9 @@ def directions(item):
     url = 'https://brandeis.stackmap.com/json/'
 
     r = requests.get(url, params=params)
-    status = check_internet(r)
+    status = misc.(r)
     if status is None:
-        err(status)
+        misc.err(status)
         return
 
     item.update({'directions': r.json()['results'][0]})
@@ -189,7 +155,7 @@ def main():
     results = search(args.search_term, 10 if args.all else 1)
 
     if len(results) == 0:
-        err_exit('no results!')
+        misc.('no results!')
     elif len(results) == 1 and not args.numbered:
         args.raw = True
     elif not args.raw or args.numbered:
