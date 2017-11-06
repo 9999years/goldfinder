@@ -5,7 +5,7 @@ from lxml import html
 import re
 
 # local
-import goldfinder.misc
+from goldfinder import misc
 
 def search_raw(search_term):
     params = {
@@ -26,12 +26,14 @@ def search_raw(search_term):
         misc.err(status)
     return r
 
+def get_english(directions):
+    return misc.get_in(directions, 'maps', 0, 'directions')
 
-def add_aisle(item):
-    return misc.get_in(item, 'directions', 'maps', 0, 'ranges', 0, 'label') or ''
+def get_aisle(directions):
+    return misc.get_in(directions, 'maps', 0, 'ranges', 0, 'label') or ''
 
-def add_floor(item):
-    url = misc.get_in(item, 'directions', 'maps', 0, 'mapurl')
+def get_floor(directions):
+    url = misc.get_in(directions, 'maps', 0, 'mapurl')
     if url is None:
         return ''
     url = urlparse.urlparse(url)
@@ -45,11 +47,16 @@ def add_floor(item):
         else:
             return int(floor)
 
-def add_building(item):
+def get_building(directions):
+    """
+    gets the building from an item's directions
+    """
     # something like: Please proceed to the mezzanine level of the Goldfarb
-    directions = misc.get_in(item, 'directions', 'maps', 0, 'directions')
-    matches = re.search(r'(Goldfarb|Farber) building', directions)
     default = 'Goldfarb / Farber'
+    directions = misc.get_in(directions, 'maps', 0, 'directions')
+    if directions is None:
+        return default
+    matches = re.search(r'(Goldfarb|Farber) building', directions)
     if matches is None:
         return default
     groups = matches.groups()
@@ -58,9 +65,9 @@ def add_building(item):
     else:
         return groups[0]
 
-def add_directions(item):
+def get_raw_directions(item):
     if 'directions' in item:
-        return
+        return item['directions']
 
     params = {
         'holding[]': '{library}$${collection}$${call}'.format(**item),
@@ -81,13 +88,36 @@ def add_directions(item):
         # ¯\_(ツ)_/¯
         return
 
-    item.update({'directions': misc.get_in(directions, 'results', 0)})
+    return misc.get_in(directions, 'results', 0)
 
-    item['directions']['aisle']    = add_aisle(item)
-    item['directions']['floor']    = add_floor(item)
-    item['directions']['building'] = add_building(item)
+def add_directions(item):
+    directions = get_raw_directions(item)
+    item['directions'] = {}
+    item['directions']['building'] = get_building(directions)
+    item['directions']['floor']    = get_floor(directions)
+    item['directions']['aisle']    = get_aisle(directions)
+    item['directions']['english']  = get_english(directions)
 
 def search(search_term, max_count=10):
+    """
+    returns a list of item dicts with the following keys:
+    library: usually Main Library
+    collection: usually Stacks, sometimes Media or Microfiche
+    call: call number, something like B3305.M74 C56 2004
+    title: item title
+    author: last, first, birth-death, something like 'Collier, Andrew 1944-' but
+        can get really verbose
+    details: unused (i think?)
+    year: something like c2004
+    directions: dict containing:
+        building: Goldfarb or Farber (unless errors, in which case
+            Goldfarb/Farber)
+        floor: 1-4 (4 is farber only) or M (goldfarb only)
+        aisle: something like 3a
+        english: plain-english directions, something like "Please proceed to the
+            third floor of Brandeis University Library." but strangely doesn't
+            contain the aisle or say "about halfway down" or anything
+    """
     tree = html.fromstring(search_raw(search_term).content)
     results = tree.cssselect('td.EXLSummary')
 
@@ -139,7 +169,8 @@ def top(search_term):
 def pretty(item):
     ret = []
     ret.append('{title} ({year}, {author})'.format(**item))
-    ret.append('{building} {floor}, {aisle}: {callno}'.format(
+    ret.append('{building} {floor}, {aisle}: {call}'.format(
+        call=item['call'],
         **item['directions']))
     return '\n'.join(ret)
 
@@ -151,7 +182,8 @@ def get_directions(
         raw=False,
         number_postfix='. ',
         indent=8,
-        separators=False
+        separators=False,
+        verbose=False,
         ):
     search_terms = search_term
     ret = []
@@ -172,6 +204,8 @@ def get_directions(
         if separators and len(search_terms) > 1:
             ret.append('\n' + ' ' * indent + search_term.upper())
             ret.append(       ' ' * indent + '-' * len(search_term))
+        if verbose:
+            ret.append(str(result))
         if numbered:
             ret.append(misc.format_left(
                 pretty(result),
@@ -188,7 +222,7 @@ def main():
         description='Find materials in the Brandeis Goldfarb / Farber libraries.',
     )
 
-    parser.add_argument('search_term', nargs='+', metavar='TERM',
+    parser.add_argument('search_term', nargs='+',
         help='search term passed directly to OneSearch, '
         'search.library.brandeis.edu. can be a call number, title, or author')
     parser.add_argument('-a', '--all', action='store_true', dest='show_all',
@@ -199,10 +233,12 @@ def main():
         help='output width')
     parser.add_argument('-r', '--raw', action='store_true',
         help='raw output; don\'t wrap text')
-    parser.add_argument('--number-postfix', default='. ',
+    parser.add_argument('--number-postfix', default='. ', metavar='STRING',
         help='string to output after the number in numbered output')
     parser.add_argument('-s', '--separators', action='store_true',
         help='output headers between search terms')
+    parser.add_argument('-v', '--verbose', action='store_true',
+        help='verbose / debug output; print dicts as well as formatted output')
     args = parser.parse_args()
 
     print(get_directions(**args.__dict__))
