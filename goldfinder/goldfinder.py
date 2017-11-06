@@ -3,11 +3,12 @@ import argparse
 from urllib import parse as urlparse
 from lxml import html
 import re
+import zs.bibtex
 
 # local
 from goldfinder import misc
 
-def search_raw(search_term):
+def search_raw(search_term, extra_params={}):
     params = {
         'mode': 'Basic',
         'vid': 'BRAND',
@@ -17,6 +18,8 @@ def search_raw(search_term):
         'fctN': 'facet_tlevel',
         'fctV': 'available',
     }
+
+    params.update(extra_params)
 
     url = 'http://search.library.brandeis.edu/primo_library/libweb/action/search.do'
 
@@ -98,7 +101,7 @@ def add_directions(item):
     item['directions']['aisle']    = get_aisle(directions)
     # item['directions']['english']  = get_english(directions)
 
-def search(search_term, max_count=10):
+def search(search_term, max_count=10, extra_params={}):
     """
     returns a list of item dicts with the following keys:
     library: usually Main Library
@@ -119,7 +122,7 @@ def search(search_term, max_count=10):
             contain the aisle or say "about halfway down" or anything.
             currently disabled.
     """
-    tree = html.fromstring(search_raw(search_term).content)
+    tree = html.fromstring(search_raw(search_term, extra_params).content)
     results = tree.cssselect('td.EXLSummary')
 
     def el_to_txt(e):
@@ -164,9 +167,6 @@ def search(search_term, max_count=10):
 
     return ret
 
-def top(search_term):
-    return search(search_term, max_count=1)[0]
-
 def pretty(item):
     ret = []
     ret.append('{title} ({year}, {author})'.format(**item))
@@ -187,6 +187,7 @@ def get_directions(
         verbose=False,
         continue_numbering=False,
         suppress=False,
+        extra_search_params={}
         ):
 
     ret = []
@@ -194,7 +195,7 @@ def get_directions(
     total_results = 0
 
     for search_t in search_term:
-        search_results = search(search_t, amount)
+        search_results = search(search_t, amount, extra_search_params)
         total_results += len(search_results)
         results.append(search_results)
 
@@ -235,14 +236,112 @@ def get_directions(
 
     return '\n'.join(ret)
 
+def args_search(args):
+    args_dict = args.__dict__
+    del args_dict['func']
+    return get_directions(**args_dict)
+
+def search_from_bib(bib):
+    magic = '1219566' # ???
+
+    bib2onesearch = {
+        'freeText': {
+            'title': 'title',
+            'author': 'creator',
+            'keywords': 'sub',
+            'issn': 'issn',
+            'isbn': 'isbn',
+            'publisher': 'lsr02',
+        },
+        'elsewhere': {
+            'year': 'vl(drStartYear7)',
+            'endyear' : f'vl({magic}22UI7)',
+            'language': f'vl({magic}10UI6)',
+        }
+    }
+
+    n = 0
+    def fill_free(subj, txt):
+        nonlocal n
+        nonlocal params
+        if n > 3:
+            return
+
+        n_magic = {
+            0: f'vl({magic}13UI0)',
+            1: f'vl({magic}15UI1)',
+            2: f'vl({magic}16UI2)',
+            3: f'vl({magic}18UI3)',
+        }
+
+        params[f'vl(freeText{n})'] = txt
+        params[n_magic[n]] = subj
+        n += 1
+
+    def set_other(key, val):
+        nonlocal params
+        if key == 'year':
+            params[bib2onesearch['elsewhere']['year']] = val
+            params[bib2onesearch['elsewhere']['endyear']] = val + 1
+        elif key == 'language':
+            params[bib2onesearch['elsewhere']['language']] = val
+
+    params = {
+        'mode': 'Advanced',
+        'vl(1UIStartWith0)': 'exact',
+        'vl(1UIStartWith1)': 'exact',
+        'vl(1UIStartWith2)': 'exact',
+        'vl(1UIStartWith3)': 'exact',
+        'vl(boolOperator0)': 'AND',
+        'vl(boolOperator1)': 'AND',
+        'vl(boolOperator2)': 'AND',
+        'vl(boolOperator3)': 'AND',
+    }
+
+    # keys ranked by specificity
+    rank = [
+        'isbn',
+        'issn',
+        'title',
+        'author',
+    ]
+
+    # fill priority items first
+    for item in rank:
+        if item in bib:
+            fill_free(bib2onesearch['freeText'][item], bib[item])
+
+    # fill in gaps next
+    for bibkey, OneSearch in bib2onesearch['freeText'].items():
+        if n == 4:
+            break
+        elif bibkey in bib:
+            fill_free(OneSearch, bib[bibkey])
+
+    for bibkey in bib2onesearch['elsewhere'].keys():
+        if bibkey in bib:
+            set_other(bibkey, bib[bibkey])
+
+    return params
+
+def bib_search(args):
+    ret = []
+    for bibtex in args.bibtex_file:
+        with open(bibtex) as bib:
+            citations = bibtex.parser.parse_string(bib.read())
+            for citation in citations:
+                params = search_from_bib(citation)
+                ret.append(get_directions(
+                    [''],
+                    extra_search_params=params,
+                    **args.__dict__))
+    return '\n'.join(ret)
+
 def main():
     parser = argparse.ArgumentParser(
         description='Find materials in the Brandeis Goldfarb / Farber libraries.',
     )
 
-    parser.add_argument('search_term', nargs='+',
-        help='search term passed directly to OneSearch, '
-        'search.library.brandeis.edu. can be a call number, title, or author')
     parser.add_argument('-a', '--amount', type=int, metavar='N', default=1,
         help='parse N results (max 10)')
     parser.add_argument('-n', '--numbered', action='store_true',
@@ -261,9 +360,23 @@ def main():
         help='verbose / debug output; print dicts as well as formatted output')
     parser.add_argument('--suppress', action='store_true',
         help='don\'t output formatted data; useful with --verbose')
+
+    subparsers = parser.add_subparsers()
+
+    search_parser = subparsers.add_parser('search')
+    search_parser.add_argument('search_term', nargs='+',
+        help='search term passed directly to OneSearch, '
+        'search.library.brandeis.edu. can be a call number, title, or author')
+    search_parser.set_defaults(func=args_search)
+
+    bib_parser = subparsers.add_parser('bib')
+    bib_parser.add_argument('bibtex_file', nargs='+',
+        help='bibtex file to process; only references title fields')
+    bib_parser.set_defaults(func=bib_search)
+
     args = parser.parse_args()
 
-    print(get_directions(**args.__dict__))
+    print(args.func(args))
 
 if __name__ == '__main__':
     main()

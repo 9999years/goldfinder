@@ -42,6 +42,7 @@ setup(
         'requests',
         'lxml',
         'cssselect',
+        'zs.bibtex',
     ],
     extras_require={
         'dev': [
