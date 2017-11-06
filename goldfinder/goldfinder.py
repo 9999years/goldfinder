@@ -176,7 +176,7 @@ def pretty(item):
 
 def get_directions(
         search_term,
-        show_all=False,
+        amount=1,
         numbered=False,
         width=78,
         raw=False,
@@ -184,13 +184,13 @@ def get_directions(
         indent=8,
         separators=False,
         verbose=False,
+        continue_numbering=False,
         ):
-    search_terms = search_term
     ret = []
     results = []
 
-    for search_term in search_terms:
-        results.extend(search(search_term, 10 if show_all else 1))
+    for search_t in search_term:
+        results.append(search(search_t, amount))
 
     if len(results) == 0:
         misc.err_exit('no results!')
@@ -200,20 +200,25 @@ def get_directions(
         numbered = True
         number_col_w = misc.digits(len(results)) + len(number_postfix)
 
-    for result, i in zip(results, range(1, len(results) + 1)):
-        if separators and len(search_terms) > 1:
-            ret.append('\n' + ' ' * indent + search_term.upper())
-            ret.append(       ' ' * indent + '-' * len(search_term))
-        if verbose:
-            ret.append(str(result))
-        if numbered:
-            ret.append(misc.format_left(
-                pretty(result),
-                firstline=(str(i) + number_postfix).rjust(number_col_w),
-                reformat=False,
-                width=width))
-        else:
-            ret.append(pretty(result))
+    i = 1
+    for search_t, search_results in zip(search_term, results):
+        if separators:
+            ret.append('\n' + ' ' * indent + search_t.upper())
+            ret.append(       ' ' * indent + '-' * len(search_t))
+        if not continue_numbering:
+            i = 1
+        for result in search_results:
+            if verbose:
+                ret.append(str(result))
+            if numbered:
+                ret.append(misc.format_left(
+                    pretty(result),
+                    firstline=(str(i) + number_postfix).rjust(number_col_w),
+                    reformat=False,
+                    width=width))
+            else:
+                ret.append(pretty(result))
+            i += 1
 
     return '\n'.join(ret)
 
@@ -225,8 +230,8 @@ def main():
     parser.add_argument('search_term', nargs='+',
         help='search term passed directly to OneSearch, '
         'search.library.brandeis.edu. can be a call number, title, or author')
-    parser.add_argument('-a', '--all', action='store_true', dest='show_all',
-        help='parse all results')
+    parser.add_argument('-a', '--amount', type=int, metavar='N',
+        help='parse N results (max 10)')
     parser.add_argument('-n', '--numbered', action='store_true',
         help='format output as a numbered list')
     parser.add_argument('-w', '--width', type=int, default=78,
@@ -237,6 +242,8 @@ def main():
         help='string to output after the number in numbered output')
     parser.add_argument('-s', '--separators', action='store_true',
         help='output headers between search terms')
+    parser.add_argument('-c', '--continue-numbering', action='store_true',
+        help='don\'t reset list numbering between search terms')
     parser.add_argument('-v', '--verbose', action='store_true',
         help='verbose / debug output; print dicts as well as formatted output')
     args = parser.parse_args()
