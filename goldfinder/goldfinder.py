@@ -193,8 +193,6 @@ def get_directions(
     results = []
     total_results = 0
 
-    print(search)
-
     for search_t in search_term:
         search_results = search(search_t, amount)
         total_results += len(search_results)
