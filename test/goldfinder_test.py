@@ -3,8 +3,7 @@ import goldfinder
 import test_constants
 
 def search(term, max_count=10, extra_params={}):
-    global results
-    ret = results[term]
+    ret = test_constants.results[term]
     if len(ret) > max_count:
         return ret[:max_count]
     else:
@@ -93,4 +92,4 @@ def test_integration_local():
         amount=3, separators=True, continue_numbering=True))
 
 def test_bib():
-    goldfinder.sys.stdin.readlines = lambda: bibtex
+    goldfinder.sys.stdin.readlines = lambda: test_constants.bibtex

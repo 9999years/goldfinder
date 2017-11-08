@@ -189,7 +189,8 @@ def get_directions(
         verbose=False,
         continue_numbering=False,
         suppress=False,
-        extra_search_params={}
+        extra_search_params={},
+        **kwargs # completely ignored
         ):
 
     ret = []
@@ -328,7 +329,7 @@ def search_from_bib(bib):
 def stdin_lines():
     ret = []
     for line in sys.stdin.readlines():
-        ret.append(line.trim())
+        ret.append(line.strip())
     return ret
 
 def regular_search(args):
@@ -336,7 +337,7 @@ def regular_search(args):
     args: an argparse object
     """
     args_dict = args.__dict__
-    if args.search_term is None:
+    if not args.search_term:
         # read from stdin
         args_dict['search_term'] = stdin_lines()
 
@@ -348,10 +349,10 @@ def bib_search(args):
     """
     ret = []
     args_dict = args.__dict__
-    if args.bibtex_file is None:
-        args['bibtex_file'] = stdin_lines()
+    if not args.bibtex:
+        args['bibtex'] = stdin_lines()
 
-    for bibtex in args_dict['bibtex_file']:
+    for bibtex in args_dict['bibtex']:
         with open(bibtex) as bib:
             citations = bibtex.parser.parse_string(bib.read())
             for citation in citations:
@@ -396,7 +397,7 @@ def main():
 
     args = parser.parse_args()
     func = regular_search
-    if args.bibtex_file:
+    if args.bibtex:
         func = bib_search
 
     print(func(args))
