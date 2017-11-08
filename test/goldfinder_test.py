@@ -644,7 +644,7 @@ results = {
     ]
 }
 
-def search(term, max_count=10):
+def search(term, max_count=10, extra_params={}):
     global results
     ret = results[term]
     if len(ret) > max_count:
@@ -695,8 +695,8 @@ def test_integration_local():
 
     assert (
 '''
-       JELLYFISH
-       ---------
+        JELLYFISH
+        ---------
 1. Jellyfish (2008, Yael Fogiel; Laetitia Gonzalez; Amir Harel; Ayelet Kait;
    Shirah Gefen; Etgar Keret 1967-; Sarah Adler; Nikol Leidman; Gera Sandler;
    Noa Knoller; Ma-Nenita de Latorre; Zharira Charifai; Meduzot Limited
@@ -711,8 +711,8 @@ def test_integration_local():
    science (c1976, Winsor, Mary P)
    Goldfarb 2, 55b: QL362.5 .W56
 
-       TOADS
-       -----
+        TOADS
+        -----
 4. The frog book; North American toads and frogs, with a study of the habits
    and life histories of those of the northeastern States. (1969, Dickerson,
    Mary Cynthia 1866-1923.)
@@ -723,14 +723,13 @@ def test_integration_local():
 6. Toads of war (1979, Iroh, Eddie)
    Goldfarb 2, 38a: PR9387.9.I7 T6
 
-       BIRDS
-       -----
-7. Birds, (1950, Menaboni, Athos 1895- ; Sara (Arnold) Menaboni)
+        BIRDS
+        -----
+7. Birds,  (1950, Menaboni, Athos 1895- ; Sara (Arnold) Menaboni)
    Goldfarb 2, 3a: + QL681 .M49
 8. Birds (c1990, Anderson, Walter Inglis 1903-1965 ; Mary Anderson Pickard)
    Farber 4, 21a: N6537.A48 A4 1990
 9. The Birds (1998, Paglia, Camille 1947-)
-   Goldfarb 2, 13a: PN1997.B547 P35 1998
-'''
+   Goldfarb 2, 13a: PN1997.B547 P35 1998'''
     == goldfinder.get_directions(['jellyfish', 'toads', 'birds'],
         amount=3, separators=True, continue_numbering=True))

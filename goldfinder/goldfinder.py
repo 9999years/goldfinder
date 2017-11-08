@@ -395,10 +395,9 @@ def main():
         'will be ignored if -b is present')
 
     args = parser.parse_args()
+    func = regular_search
     if args.bibtex_file:
         func = bib_search
-    else args.search_term:
-        func = regular_search
 
     print(func(args))
 
