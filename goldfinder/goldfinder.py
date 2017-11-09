@@ -6,11 +6,10 @@ import sys
 import zs.bibtex
 from lxml import html
 import requests
+import bibtexparser
 
 # local
 from goldfinder import misc
-
-version = '1.2.0'
 
 def get_english(directions):
     return misc.get_in(directions, 'maps', 0, 'directions')
@@ -105,15 +104,13 @@ def _el_to_txt(e):
     """
     takes a list or variable of type lxml.html.HtmlElement
     """
-    if len(e) > 0:
+    if isinstance(e, list) and len(e) > 0:
         return _el_to_txt(e[0])
     elif isinstance(e, html.HtmlElement):
         txt = e.text_content()
-        return '' if txt is None else txt.strip()
-    elif len(e) == 0:
-        return ''
+        return None if txt is None else txt.strip()
     else:
-        return str(e)
+        raise ValueError('input MUST be an lxml.html.HtmlElement')
 
 def _fix_call_number(call_number):
     return call_number.strip('() \t\r\n')
@@ -152,7 +149,7 @@ def itemize_element_light(el):
     """
 
     pre = lambda x: _el_to_txt(
-        availability.cssselect('span.EXLAvailability' + x))
+        el.cssselect('span.EXLAvailability' + x))
 
     item = {
         'library':     pre('LibraryName'),
@@ -275,6 +272,7 @@ def get_directions(
         continue_numbering=False,
         suppress=False,
         extra_search_params={},
+        start_number=1,
         **kwargs # completely ignored
         ):
 
@@ -290,14 +288,14 @@ def get_directions(
         results.append(search_results)
 
     if total_results == 0:
-        misc.err_exit('no results!')
+        return ''
     elif total_results == 1 and not numbered:
         raw = True
     elif not raw or numbered or (total_results > 1 and not raw):
         numbered = True
         number_col_w = misc.digits(total_results) + len(number_postfix)
 
-    i = 1
+    i = start_number
 
     if suppress:
         ret = []
@@ -310,7 +308,7 @@ def get_directions(
             ret.append('\n' + ' ' * indent + search_t.upper())
             ret.append(       ' ' * indent + '-' * len(search_t))
         if not continue_numbering:
-            i = 1
+            i = start_number
         for result in search_results:
             if verbose:
                 ret.append(str(result))
@@ -360,7 +358,7 @@ def search_from_bib(bib):
             0: f'vl({magic}13UI0)',
             1: f'vl({magic}15UI1)',
             2: f'vl({magic}16UI2)',
-            3: f'vl({magic}18UI3)',
+            3: f'vl({magic}17UI3)',
         }
 
         params[f'vl(freeText{n})'] = txt
@@ -371,20 +369,22 @@ def search_from_bib(bib):
         nonlocal params
         if key == 'year':
             params[bib2onesearch['elsewhere']['year']] = val
-            params[bib2onesearch['elsewhere']['endyear']] = val + 1
+            params[bib2onesearch['elsewhere']['endyear']] = str(int(val) + 1)
+            # set month / day to jan 1
+            params[f'vl({magic}18UI7)'] = '01'
+            params[f'vl({magic}19UI7)'] = '01'
+            params[f'vl({magic}20UI7)'] = '01'
+            params[f'vl({magic}21UI7)'] = '01'
+
         elif key == 'language':
             params[bib2onesearch['elsewhere']['language']] = val
 
     params = {
         'mode': 'Advanced',
-        'vl(1UIStartWith0)': 'exact',
-        'vl(1UIStartWith1)': 'exact',
-        'vl(1UIStartWith2)': 'exact',
-        'vl(1UIStartWith3)': 'exact',
-        'vl(boolOperator0)': 'AND',
-        'vl(boolOperator1)': 'AND',
-        'vl(boolOperator2)': 'AND',
-        'vl(boolOperator3)': 'AND',
+        'vl(freeText0)': '',
+        'vl(freeText1)': '',
+        'vl(freeText2)': '',
+        'vl(freeText3)': '',
     }
 
     # keys ranked by specificity
@@ -399,6 +399,7 @@ def search_from_bib(bib):
     for item in rank:
         if item in bib:
             fill_free(bib2onesearch['freeText'][item], bib[item])
+            del bib[item]
 
     # fill in gaps next
     for bibkey, OneSearch in bib2onesearch['freeText'].items():
@@ -410,6 +411,10 @@ def search_from_bib(bib):
     for bibkey in bib2onesearch['elsewhere'].keys():
         if bibkey in bib:
             set_other(bibkey, bib[bibkey])
+
+    for i in range(4):
+        params[f'vl(1UIStartWith{i})'] = 'contains'
+        params[f'vl(boolOperator{i})'] = 'AND'
 
     return params
 
@@ -435,19 +440,26 @@ def bib_search(args):
     args: an argparse object
     """
     ret = []
-    args_dict = args.__dict__
     if not args.bibtex:
         args['bibtex'] = stdin_lines()
+    args_dict = args.__dict__.copy()
+    del args_dict['search_term']
 
-    for bibtex in args_dict['bibtex']:
-        with open(bibtex) as bib:
-            citations = bibtex.parser.parse_string(bib.read())
-            for citation in citations:
+    n = 1
+    for bibtex_file in args.bibtex:
+        with open(bibtex_file, encoding='utf-8') as bibfile:
+            if not args.continue_numbering:
+                n = 1
+            citations = bibtexparser.load(bibfile)
+            for citation in citations.entries:
                 params = search_from_bib(citation)
-                ret.append(get_directions(
-                    [''],
+                item = get_directions([''],
                     extra_search_params=params,
-                    **args_dict))
+                    start_number=n,
+                    **args_dict)
+                if len(item.strip()):
+                    ret.append(item)
+                    n += 1
     return '\n'.join(ret)
 
 def main():
