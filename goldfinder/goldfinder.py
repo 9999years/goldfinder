@@ -10,26 +10,7 @@ import requests
 # local
 from goldfinder import misc
 
-def search_raw(search_term, extra_params={}):
-    params = {
-        'mode': 'Basic',
-        'vid': 'BRAND',
-        'vl(freeText0)': search_term,
-        'fn': 'search',
-        'tab': 'alma',
-        'fctN': 'facet_tlevel',
-        'fctV': 'available',
-    }
-
-    params.update(extra_params)
-
-    url = 'http://search.library.brandeis.edu/primo_library/libweb/action/search.do'
-
-    r = requests.get(url, params=params)
-    status = misc.check_internet(r)
-    if status is None:
-        misc.err(status)
-    return r
+version = '1.2.0'
 
 def get_english(directions):
     return misc.get_in(directions, 'maps', 0, 'directions')
@@ -103,6 +84,102 @@ def add_directions(item):
     item['directions']['aisle']    = get_aisle(directions)
     # item['directions']['english']  = get_english(directions)
 
+def itemize_element_deep(el):
+    """
+    el is a td.EXLSummary
+
+    Sometimes books are available both in the library and online, in which
+    case OneSearch doesn't display the call number??? so we have to grab a
+    uuid
+
+    books like this one:
+    http://search.library.brandeis.edu/primo_library/libweb/action/search.do?mode=Basic&vid=BRAND&vl(freeText0)=QA76.9.H85+R37+2000&fn=search&tab=alma&
+    """
+    # 'https://na01.alma.exlibrisgroup.com/view/uresolver/01BRAND_INST/openurl'
+    # 'rfr_id': 'info:sid/primo.exlibrisgroup.com-BRAND_ALMA',
+    # 'rft_dat': 'ie=01BRAND_INST:21229408670001921&svc_dat=getit',
+
+    # something like 'snippet_BRAND_ALMA21229408670001921'
+    uid = el.cssselect('p.EXLResultSnippet')[0].attrib['id']
+    # trim the 'snippet_BRAND_ALMA' (18 chars)
+    uid = uid[18:]
+    print(uid)
+
+def itemize_element(el):
+    """
+    el is a td.EXLSummary
+    """
+    def el_to_txt(e):
+        """
+        takes a list or variable of type lxml.html.HtmlElement
+        """
+        if len(e) > 0:
+            return el_to_txt(e[0])
+        elif isinstance(e, html.HtmlElement):
+            txt = e[0].text_content()
+            return '' if txt is None else txt.strip()
+        else:
+            return str(e)
+
+    def fix_call(call_number):
+        return call_number.strip('() \t\r\n')
+
+    availability = el.cssselect('em.EXLResultStatusAvailable')
+    availability = availability[0] if len(availability) > 0 else None
+    summary = el.cssselect('div.EXLSummaryFields')[0]
+    summary = summary[0] if len(summary) > 0 else None
+
+    if availability.text_content() == ('Online access. '
+        'The library also has physical copies.'):
+        # no call number here!!! we gotta go deeper
+        itemize_element_deep(el)
+
+    exl_prefix = 'span.EXLAvailability'
+
+    item = {
+        'library':     availability.cssselect(exl_prefix + 'LibraryName'),
+        'collection':  availability.cssselect(exl_prefix + 'CollectionName'),
+        'call':        availability.cssselect(exl_prefix + 'CallNumber'),
+        'title':       summary.cssselect('h2.EXLResultTitle > a'),
+        'author':      summary.cssselect('h3.EXLResultAuthor'),
+        'details':     summary.cssselect('span.EXLResultDetails'),
+        'year':        summary.cssselect('h3.EXLResultFourthLine'),
+    }
+
+    if len(item['call']) == 0:
+        continue
+
+    item.update({k: el_to_txt(v) for k, v in item.items()})
+    item['call'] = fix_call(item['call'])
+
+    add_directions(item)
+
+    return item
+
+def search_raw(search_term, extra_params={}):
+    params = {
+        'mode': 'Basic',
+        'vid': 'BRAND',
+        'vl(freeText0)': search_term,
+        'fn': 'search',
+        'tab': 'alma',
+        'fctN': 'facet_tlevel',
+        'fctV': 'available',
+    }
+
+    params.update(extra_params)
+
+    url = 'http://search.library.brandeis.edu/primo_library/libweb/action/search.do'
+
+    r = requests.get(url, params=params)
+    status = misc.check_internet(r)
+    if status is None:
+        misc.err(status)
+    return r
+
+def search_tree(search_term, extra_params={}):
+    return html.fromstring(search_raw(search_term, extra_params).content)
+
 def search(search_term, max_count=10, extra_params={}):
     """
     returns a list of item dicts with the following keys:
@@ -124,44 +201,12 @@ def search(search_term, max_count=10, extra_params={}):
             contain the aisle or say "about halfway down" or anything.
             currently disabled.
     """
-    tree = html.fromstring(search_raw(search_term, extra_params).content)
+    tree = search_tree(search_term, extra_params)
     results = tree.cssselect('td.EXLSummary')
-
-    def el_to_txt(e):
-        if len(e) > 0:
-            txt = e[0].text_content()
-            return '' if txt is None else txt.strip()
-        else:
-            return ''
-
-    def fix_call(call_number):
-        return call_number.strip('() \t\r\n')
 
     ret = []
     for result in results:
-        availability = result.cssselect('em.EXLResultStatusAvailable')[0]
-        summary = result.cssselect('div.EXLSummaryFields')[0]
-
-        exl_prefix = 'span.EXLAvailability'
-
-        item = {
-            'library':     availability.cssselect(exl_prefix + 'LibraryName'),
-            'collection':  availability.cssselect(exl_prefix + 'CollectionName'),
-            'call':        availability.cssselect(exl_prefix + 'CallNumber'),
-            'title':       summary.cssselect('h2.EXLResultTitle > a'),
-            'author':      summary.cssselect('h3.EXLResultAuthor'),
-            'details':     summary.cssselect('span.EXLResultDetails'),
-            'year':        summary.cssselect('h3.EXLResultFourthLine'),
-        }
-
-        if len(item['call']) == 0:
-            continue
-
-        item.update({k: el_to_txt(v) for k, v in item.items()})
-        item['call'] = fix_call(item['call'])
-
-        add_directions(item)
-
+        item = itemize_element(result)
         ret.append(item)
 
         if len(ret) >= max_count:
@@ -198,6 +243,8 @@ def get_directions(
     total_results = 0
 
     for search_t in search_term:
+        if verbose:
+            print(f'searching for `{search_t}`')
         search_results = search(search_t, amount, extra_search_params)
         total_results += len(search_results)
         results.append(search_results)
@@ -387,13 +434,13 @@ def main():
     parser.add_argument('--suppress', action='store_true',
         help='don\'t output formatted data; useful with --verbose')
 
+    parser.add_argument('-b', '--bibtex', nargs='*',
+        help='bibtex file to process; if no arguments are present, reads '
+        'from STDIN as bibtex. prioritized over search_term, i.e. search_term '
+        'will be ignored if -b is present')
     parser.add_argument('search_term', nargs='*',
         help='search term passed directly to OneSearch, '
         'search.library.brandeis.edu. can be a call number, title, or author')
-    parser.add_argument('-b', '--bibtex', nargs='*',
-        help='bibtex file to process; if no arguments are present, reads '
-        'from STDIN as bibtex. prioritized over search_term, i.e. search_term ' 
-        'will be ignored if -b is present')
 
     args = parser.parse_args()
     func = regular_search
