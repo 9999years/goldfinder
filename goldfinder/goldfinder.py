@@ -84,73 +84,112 @@ def add_directions(item):
     item['directions']['aisle']    = get_aisle(directions)
     # item['directions']['english']  = get_english(directions)
 
+def request_page_raw(uid, extra_params):
+    params = {
+        'rfr_id': 'info:sid/primo.exlibrisgroup.com-BRAND_ALMA',
+        'rft_dat': f'ie=01BRAND_INST:{uid}',
+        'svc_dat': 'getit',
+    }
+
+    params.update(extra_params)
+
+    url = 'https://na01.alma.exlibrisgroup.com/view/uresolver/01BRAND_INST/openurl'
+
+    r = requests.get(url, params=params)
+    status = misc.check_internet(r)
+    if status is None:
+        misc.err(status)
+    return r
+
+def _el_to_txt(e):
+    """
+    takes a list or variable of type lxml.html.HtmlElement
+    """
+    if len(e) > 0:
+        return _el_to_txt(e[0])
+    elif isinstance(e, html.HtmlElement):
+        txt = e.text_content()
+        return '' if txt is None else txt.strip()
+    elif len(e) == 0:
+        return ''
+    else:
+        return str(e)
+
+def _fix_call_number(call_number):
+    return call_number.strip('() \t\r\n')
+
 def itemize_element_deep(el):
     """
     el is a td.EXLSummary
 
     Sometimes books are available both in the library and online, in which
     case OneSearch doesn't display the call number??? so we have to grab a
-    uuid
+    uid
 
-    books like this one:
-    http://search.library.brandeis.edu/primo_library/libweb/action/search.do?mode=Basic&vid=BRAND&vl(freeText0)=QA76.9.H85+R37+2000&fn=search&tab=alma&
+    books like: QA76.9.H85 R37 2000
     """
-    # 'https://na01.alma.exlibrisgroup.com/view/uresolver/01BRAND_INST/openurl'
-    # 'rfr_id': 'info:sid/primo.exlibrisgroup.com-BRAND_ALMA',
-    # 'rft_dat': 'ie=01BRAND_INST:21229408670001921&svc_dat=getit',
-
     # something like 'snippet_BRAND_ALMA21229408670001921'
     uid = el.cssselect('p.EXLResultSnippet')[0].attrib['id']
     # trim the 'snippet_BRAND_ALMA' (18 chars)
     uid = uid[18:]
-    print(uid)
+
+    tree = tree_request(request_page_raw, uid)
+    holding_info = tree.cssselect('ul.holdingInfo')[0]
+
+    pre = lambda x: _el_to_txt(holding_info.cssselect(f'span.item{x}'))
+
+    item = {
+        'library':    pre('LibraryName'),
+        'collection': pre('LocationName'),
+        'call':       pre('AccessionNumber'),
+    }
+
+    return item
+
+def itemize_element_light(el):
+    """
+    el is a td.EXLResultStatusAvailable
+    """
+
+    pre = lambda x: _el_to_txt(
+        availability.cssselect('span.EXLAvailability' + x))
+
+    item = {
+        'library':     pre('LibraryName'),
+        'collection':  pre('CollectionName'),
+        'call':        pre('CallNumber'),
+    }
+
+    return item
 
 def itemize_element(el):
     """
     el is a td.EXLSummary
     """
-    def el_to_txt(e):
-        """
-        takes a list or variable of type lxml.html.HtmlElement
-        """
-        if len(e) > 0:
-            return el_to_txt(e[0])
-        elif isinstance(e, html.HtmlElement):
-            txt = e[0].text_content()
-            return '' if txt is None else txt.strip()
-        else:
-            return str(e)
-
-    def fix_call(call_number):
-        return call_number.strip('() \t\r\n')
-
     availability = el.cssselect('em.EXLResultStatusAvailable')
     availability = availability[0] if len(availability) > 0 else None
-    summary = el.cssselect('div.EXLSummaryFields')[0]
+    summary = el.cssselect('div.EXLSummaryFields')
     summary = summary[0] if len(summary) > 0 else None
 
-    if availability.text_content() == ('Online access. '
-        'The library also has physical copies.'):
-        # no call number here!!! we gotta go deeper
-        itemize_element_deep(el)
-
-    exl_prefix = 'span.EXLAvailability'
+    pre = lambda x: _el_to_txt(summary.cssselect(x.format('EXLResult')))
 
     item = {
-        'library':     availability.cssselect(exl_prefix + 'LibraryName'),
-        'collection':  availability.cssselect(exl_prefix + 'CollectionName'),
-        'call':        availability.cssselect(exl_prefix + 'CallNumber'),
-        'title':       summary.cssselect('h2.EXLResultTitle > a'),
-        'author':      summary.cssselect('h3.EXLResultAuthor'),
-        'details':     summary.cssselect('span.EXLResultDetails'),
-        'year':        summary.cssselect('h3.EXLResultFourthLine'),
+        'title':   pre('h2.{}Title > a'),
+        'author':  pre('h3.{}Author'),
+        'details': pre('span.{}Details'),
+        'year':    pre('h3.{}FourthLine'),
     }
 
-    if len(item['call']) == 0:
-        continue
+    if 'The library also has physical copies.' in availability.text_content():
+        # no call number here!!! we gotta go deeper
+        item.update(itemize_element_deep(el))
+    else:
+        item.update(itemize_element_light(availability))
 
-    item.update({k: el_to_txt(v) for k, v in item.items()})
-    item['call'] = fix_call(item['call'])
+    # if len(item['call']) == 0:
+        # return item
+
+    item['call'] = _fix_call_number(item['call'])
 
     add_directions(item)
 
@@ -177,8 +216,8 @@ def search_raw(search_term, extra_params={}):
         misc.err(status)
     return r
 
-def search_tree(search_term, extra_params={}):
-    return html.fromstring(search_raw(search_term, extra_params).content)
+def tree_request(func, search_term, extra_params={}):
+    return html.fromstring(func(search_term, extra_params).content)
 
 def search(search_term, max_count=10, extra_params={}):
     """
@@ -201,7 +240,7 @@ def search(search_term, max_count=10, extra_params={}):
             contain the aisle or say "about halfway down" or anything.
             currently disabled.
     """
-    tree = search_tree(search_term, extra_params)
+    tree = tree_request(search_raw, search_term, extra_params)
     results = tree.cssselect('td.EXLSummary')
 
     ret = []
@@ -216,10 +255,11 @@ def search(search_term, max_count=10, extra_params={}):
 
 def pretty(item):
     ret = []
-    ret.append('{title} ({year}, {author})'.format(**item))
-    ret.append('{building} {floor}, {aisle}: {call}'.format(
-        call=item['call'],
-        **item['directions']))
+    ret.append('{title} ({author}, {year})'.format(**item))
+    if 'directions' in item:
+        ret.append('{building} {floor}, {aisle}: {call}'.format(
+            call=item['call'],
+            **item['directions']))
     return '\n'.join(ret)
 
 def get_directions(
