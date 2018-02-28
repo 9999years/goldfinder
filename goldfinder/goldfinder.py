@@ -163,10 +163,8 @@ def itemize_element(el):
     """
     el is a td.EXLSummary
     """
-    availability = el.cssselect('em.EXLResultStatusAvailable')
-    availability = availability[0] if len(availability) > 0 else None
-    summary = el.cssselect('div.EXLSummaryFields')
-    summary = summary[0] if len(summary) > 0 else None
+    availability = el.cssselect('em.EXLResultStatusAvailable')[0]
+    summary = el.cssselect('div.EXLSummaryFields')[0]
 
     pre = lambda x: _el_to_txt(summary.cssselect(x.format('EXLResult')))
 
@@ -259,19 +257,9 @@ def pretty(item):
             **item['directions']))
     return '\n'.join(ret)
 
-def get_directions(
-        search_term,
-        amount=1,
-        numbered=False,
-        width=78,
-        raw=False,
-        number_postfix='. ',
-        indent=8,
-        separators=False,
-        verbose=False,
-        continue_numbering=False,
-        suppress=False,
-        extra_search_params={},
+def get_directions(search_term, amount=1, numbered=False, width=78, raw=False,
+        number_postfix='. ', indent=8, separators=False, verbose=False,
+        continue_numbering=False, suppress=False, extra_search_params={},
         start_number=1,
         **kwargs # completely ignored
         ):
@@ -307,7 +295,7 @@ def get_directions(
         if separators:
             ret.append('\n' + ' ' * indent + search_t.upper())
             ret.append(       ' ' * indent + '-' * len(search_t))
-        if not continue_numbering:
+        if separators and not continue_numbering or amount > 1:
             i = start_number
         for result in search_results:
             if verbose:
@@ -385,6 +373,7 @@ def search_from_bib(bib):
         'vl(freeText1)': '',
         'vl(freeText2)': '',
         'vl(freeText3)': '',
+        'fctV': '',
     }
 
     # keys ranked by specificity

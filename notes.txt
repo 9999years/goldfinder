@@ -1,21 +1,4 @@
-search url:
-http://search.library.brandeis.edu/primo_library/libweb/action/search.do
-GET params:
-    mode=Basic
-    vid=BRAND
-    vl(freeText0)=(Search term or call number)
-    fn=search
-    tab=alma
-    fctN=facet_tlevel
-    fctV=available
-
-extract info from first em.EXLResultStatusAvailable
-
-call https://brandeis.stackmap.com/json/
-GET params:
-    holding[]=(EXLAvailabityLibraryName)$$
-              (EXLAvailabityCollectionName)$$
-              (EXLAvailabityCallNumber)
-    alt=true
-
-make sure to delete wrapping parens in EXLAvailabityCallNumber
+to do:
+* better failure modes (ie unknown locations, books in storage like TK7867
+  .S235 2002)
+* grouping by location (consistent syntax means... sorting based on library, floor, aisle, call would actually work)
